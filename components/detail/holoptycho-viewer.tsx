@@ -3,10 +3,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, Hash, Activity } from 'lucide-react';
 import {
-  fetchThumbnailIfChanged,
+  fetchArrayInfo,
+  fetchArrayBytesIfChanged,
   listChildren,
   getMetadata,
+  type ArrayInfo,
 } from '@/lib/tiled/client';
+import { paintFloatArrayToCanvas } from '@/lib/tiled/colormap';
 import { useTiledSubscription } from '@/hooks/use-tiled-subscription';
 
 interface HoloptychoViewerProps {
@@ -22,73 +25,32 @@ interface SourceInfo {
   hasVit: boolean;
 }
 
-// Tiles poll on this cadence using If-None-Match. Most polls return 304 (cheap, ~1KB
-// of headers) — only when the upstream array's bytes change does the full PNG transfer.
+// Tiles poll on this cadence using If-None-Match. Most polls return 304 (cheap,
+// just headers) — only when the upstream array's bytes change does the full
+// float buffer transfer.
 const POLL_INTERVAL_MS = 2000;
 
-// Tiled's PNG endpoint silently ignores `cmap=` for our deployment — see
-// array-viewer.tsx, which fetches grayscale and applies viridis client-side.
-// We do the same here for magma so the ViT mosaic isn't rendered as B&W.
-// LUT generated via matplotlib.cm.magma(np.linspace(0,1,256))[:, :3] * 255.
-const MAGMA_LUT_FLAT = Uint8Array.of(
-  0,0,4, 1,0,5, 1,1,6, 1,1,8, 2,1,9, 2,2,11, 2,2,13, 3,3,15, 3,3,18, 4,4,20, 5,4,22, 6,5,24, 6,5,26, 7,6,28, 8,7,30,
-  9,7,32, 10,8,34, 11,9,36, 12,9,38, 13,10,41, 14,11,43, 16,11,45, 17,12,47, 18,13,49, 19,13,52, 20,14,54, 21,14,56,
-  22,15,59, 24,15,61, 25,16,63, 26,16,66, 28,16,68, 29,17,71, 30,17,73, 32,17,75, 33,17,78, 34,17,80, 36,18,83,
-  37,18,85, 39,18,88, 41,17,90, 42,17,92, 44,17,95, 45,17,97, 47,17,99, 49,17,101, 51,16,103, 52,16,105, 54,16,107,
-  56,16,108, 57,15,110, 59,15,112, 61,15,113, 63,15,114, 64,15,116, 66,15,117, 68,15,118, 69,16,119, 71,16,120,
-  73,16,120, 74,16,121, 76,17,122, 78,17,123, 79,18,123, 81,18,124, 82,19,124, 84,19,125, 86,20,125, 87,21,126,
-  89,21,126, 90,22,126, 92,22,127, 93,23,127, 95,24,127, 96,24,128, 98,25,128, 100,26,128, 101,26,128, 103,27,128,
-  104,28,129, 106,28,129, 107,29,129, 109,29,129, 110,30,129, 112,31,129, 114,31,129, 115,32,129, 117,33,129,
-  118,33,129, 120,34,129, 121,34,130, 123,35,130, 124,35,130, 126,36,130, 128,37,130, 129,37,129, 131,38,129,
-  132,38,129, 134,39,129, 136,39,129, 137,40,129, 139,41,129, 140,41,129, 142,42,129, 144,42,129, 145,43,129,
-  147,43,128, 148,44,128, 150,44,128, 152,45,128, 153,45,128, 155,46,127, 156,46,127, 158,47,127, 160,47,127,
-  161,48,126, 163,48,126, 165,49,126, 166,49,125, 168,50,125, 170,51,125, 171,51,124, 173,52,124, 174,52,123,
-  176,53,123, 178,53,123, 179,54,122, 181,54,122, 183,55,121, 184,55,121, 186,56,120, 188,57,120, 189,57,119,
-  191,58,119, 192,58,118, 194,59,117, 196,60,117, 197,60,116, 199,61,115, 200,62,115, 202,62,114, 204,63,113,
-  205,64,113, 207,64,112, 208,65,111, 210,66,111, 211,67,110, 213,68,109, 214,69,108, 216,69,108, 217,70,107,
-  219,71,106, 220,72,105, 222,73,104, 223,74,104, 224,76,103, 226,77,102, 227,78,101, 228,79,100, 229,80,100,
-  231,82,99, 232,83,98, 233,84,98, 234,86,97, 235,87,96, 236,88,96, 237,90,95, 238,91,94, 239,93,94, 240,95,94,
-  241,96,93, 242,98,93, 242,100,92, 243,101,92, 244,103,92, 244,105,92, 245,107,92, 246,108,92, 246,110,92,
-  247,112,92, 247,114,92, 248,116,92, 248,118,92, 249,120,93, 249,121,93, 249,123,93, 250,125,94, 250,127,94,
-  250,129,95, 251,131,95, 251,133,96, 251,135,97, 252,137,97, 252,138,98, 252,140,99, 252,142,100, 252,144,101,
-  253,146,102, 253,148,103, 253,150,104, 253,152,105, 253,154,106, 253,155,107, 254,157,108, 254,159,109, 254,161,110,
-  254,163,111, 254,165,113, 254,167,114, 254,169,115, 254,170,116, 254,172,118, 254,174,119, 254,176,120, 254,178,122,
-  254,180,123, 254,182,124, 254,183,126, 254,185,127, 254,187,129, 254,189,130, 254,191,132, 254,193,133, 254,194,135,
-  254,196,136, 254,198,138, 254,200,140, 254,202,141, 254,204,143, 254,205,144, 254,207,146, 254,209,148, 254,211,149,
-  254,213,151, 254,215,153, 254,216,154, 253,218,156, 253,220,158, 253,222,160, 253,224,161, 253,226,163, 253,227,165,
-  253,229,167, 253,231,169, 253,233,170, 253,235,172, 252,236,174, 252,238,176, 252,240,178, 252,242,180, 252,244,182,
-  252,246,184, 252,247,185, 252,249,187, 252,251,189, 252,253,191
-);
+// Decode raw bytes from Tiled into the right TypedArray for `dtype`. We assume
+// little-endian on the wire (Tiled's default, and matches every machine we
+// run on); returns null if the dtype isn't one we can render.
+function decodeFloatBuffer(
+  buffer: ArrayBuffer,
+  dtype: { kind: string; itemsize: number },
+): Float32Array | Float64Array | null {
+  if (dtype.kind === 'f' && dtype.itemsize === 4) return new Float32Array(buffer);
+  if (dtype.kind === 'f' && dtype.itemsize === 8) return new Float64Array(buffer);
+  return null;
+}
 
-async function applyMagmaToImage(blobUrl: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { reject(new Error('Could not get canvas context')); return; }
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const gray = data[i];
-        const j = gray * 3;
-        data[i]     = MAGMA_LUT_FLAT[j];
-        data[i + 1] = MAGMA_LUT_FLAT[j + 1];
-        data[i + 2] = MAGMA_LUT_FLAT[j + 2];
-      }
-      ctx.putImageData(imageData, 0, 0);
-      canvas.toBlob((blob) => {
-        if (blob) resolve(URL.createObjectURL(blob));
-        else reject(new Error('Failed to create blob'));
-      }, 'image/png');
-    };
-    img.onerror = () => reject(new Error('Failed to load image'));
-    img.src = blobUrl;
-  });
+// Pull the 2D display shape (height, width) out of a full array shape.
+// Every tile here renders something whose final two dims are the image plane,
+// so trailing (-2, -1) is the right answer for slice=0 (drops leading dim) and
+// slice=":,:" (passthrough) alike.
+function deriveDisplayShape(fullShape: number[]): [number, number] | null {
+  if (fullShape.length < 2) return null;
+  const h = fullShape[fullShape.length - 2];
+  const w = fullShape[fullShape.length - 1];
+  return [h, w];
 }
 
 async function discoverSources(runPath: string): Promise<SourceInfo> {
@@ -108,7 +70,6 @@ interface TiledImageTileProps {
   path: string;
   // Slice expression passed to tiled — e.g. 0 for (mode, H, W) or "0,1" for (B, C, H, W)
   slice: number | string;
-  cmap?: string;
   // Polling cadence — set to 0/undefined to disable polling (e.g. for `final/` arrays
   // that never change after a run completes).
   pollIntervalMs?: number;
@@ -122,14 +83,12 @@ function TiledImageTile({
   subtitle,
   path,
   slice,
-  cmap = 'viridis',
   pollIntervalMs,
   onChanged,
 }: TiledImageTileProps) {
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const previousUrlRef = useRef<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const onChangedRef = useRef(onChanged);
 
   useEffect(() => {
@@ -140,43 +99,83 @@ function TiledImageTile({
     let cancelled = false;
     let etag: string | null = null;
     let inflight = false;
+    let info: ArrayInfo | null = null;
+    let displayShape: [number, number] | null = null;
+
+    const ensureInfo = async (): Promise<boolean> => {
+      if (info) return true;
+      try {
+        info = await fetchArrayInfo(path);
+      } catch {
+        if (!cancelled) {
+          setError('Failed to load');
+          setHasLoadedOnce(true);
+        }
+        return false;
+      }
+      displayShape = deriveDisplayShape(info.shape);
+      if (!displayShape) {
+        if (!cancelled) {
+          setError(`Unsupported array shape: [${info.shape.join(', ')}]`);
+          setHasLoadedOnce(true);
+        }
+        return false;
+      }
+      if (info.dtype.kind !== 'f') {
+        if (!cancelled) {
+          setError(`Unsupported dtype: ${info.dtype.kind}${info.dtype.itemsize}`);
+          setHasLoadedOnce(true);
+        }
+        return false;
+      }
+      return true;
+    };
 
     const tick = async () => {
       if (cancelled || inflight) return;
       inflight = true;
-      const result = await fetchThumbnailIfChanged(path, cmap, slice, etag);
-      inflight = false;
-      if (cancelled) {
-        if (result.status === 'changed') URL.revokeObjectURL(result.blobUrl);
-        return;
-      }
-      if (result.status === 'changed') {
-        etag = result.etag;
-        // Tiled returns a grayscale PNG — apply the requested colormap
-        // client-side. The returned blob from fetchThumbnailIfChanged is
-        // revoked once we've consumed it via the colormap canvas pass.
-        let displayUrl = result.blobUrl;
-        if (cmap === 'magma') {
-          try {
-            displayUrl = await applyMagmaToImage(result.blobUrl);
-          } catch {
-            // Fall back to the grayscale PNG if the canvas pass fails.
-          } finally {
-            if (displayUrl !== result.blobUrl) URL.revokeObjectURL(result.blobUrl);
+      try {
+        if (!(await ensureInfo())) return;
+        const result = await fetchArrayBytesIfChanged(path, slice, etag);
+        if (cancelled || result.status === 'unchanged') return;
+        if (result.status === 'error') {
+          // Only surface errors before we've ever loaded; transient polling errors
+          // shouldn't replace a perfectly good last frame.
+          if (!etag && !cancelled) {
+            setError('Failed to load');
+            setHasLoadedOnce(true);
           }
-          if (cancelled) { URL.revokeObjectURL(displayUrl); return; }
+          return;
         }
-        if (previousUrlRef.current) URL.revokeObjectURL(previousUrlRef.current);
-        previousUrlRef.current = displayUrl;
-        setImageUrl(displayUrl);
+        etag = result.etag;
+        const data = decodeFloatBuffer(result.buffer, info!.dtype);
+        if (!data) {
+          if (!cancelled) {
+            setError(`Unsupported dtype: ${info!.dtype.kind}${info!.dtype.itemsize}`);
+            setHasLoadedOnce(true);
+          }
+          return;
+        }
+        const [h, w] = displayShape!;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        // Sanity-check: byte length should match h*w*itemsize. If not, the
+        // slice produced a different shape than we derived — bail loudly
+        // rather than rendering garbage.
+        if (data.length !== h * w) {
+          if (!cancelled) {
+            setError(`Slice shape mismatch (${data.length} vs ${h}×${w})`);
+            setHasLoadedOnce(true);
+          }
+          return;
+        }
+        paintFloatArrayToCanvas(canvas, data, w, h);
+        if (cancelled) return;
         setHasLoadedOnce(true);
         setError(null);
         onChangedRef.current?.();
-      } else if (result.status === 'error' && !etag) {
-        // Only surface errors before we've ever loaded; transient errors during polling
-        // shouldn't replace a perfectly good last frame.
-        setError('Failed to load');
-        setHasLoadedOnce(true);
+      } finally {
+        inflight = false;
       }
     };
 
@@ -186,14 +185,7 @@ function TiledImageTile({
     }
     const handle = setInterval(tick, pollIntervalMs);
     return () => { cancelled = true; clearInterval(handle); };
-  }, [path, slice, cmap, pollIntervalMs]);
-
-  // Revoke on unmount
-  useEffect(() => {
-    return () => {
-      if (previousUrlRef.current) URL.revokeObjectURL(previousUrlRef.current);
-    };
-  }, []);
+  }, [path, slice, pollIntervalMs]);
 
   return (
     <div className="flex flex-col">
@@ -202,16 +194,17 @@ function TiledImageTile({
         {subtitle && <span className="text-[10px] text-text-tertiary font-mono">{subtitle}</span>}
       </div>
       <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised border border-border-subtle">
-        {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt={title} className="w-full h-full object-contain" />
-        ) : null}
+        <canvas
+          ref={canvasRef}
+          aria-label={title}
+          className="w-full h-full object-contain"
+        />
         {!hasLoadedOnce && (
           <div className="absolute inset-0 flex items-center justify-center">
             <Loader2 className="w-5 h-5 text-beam animate-spin" />
           </div>
         )}
-        {error && !imageUrl && (
+        {error && (
           <div className="absolute inset-0 flex items-center justify-center text-text-tertiary text-xs">
             {error}
           </div>
@@ -342,7 +335,6 @@ export function HoloptychoViewer({ path, metadata }: HoloptychoViewerProps) {
             subtitle={vitBatch !== null ? `batch ${vitBatch}` : undefined}
             path={`${path}/vit/mosaic`}
             slice=":,:"
-            cmap="magma"
             pollIntervalMs={vitPollMs}
             onChanged={handleVitChanged}
           />

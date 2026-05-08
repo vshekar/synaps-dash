@@ -434,6 +434,72 @@ export async function fetchArrayData(path: string): Promise<number[][]> {
   return response.json();
 }
 
+// Tiled's structure.data_type — narrow view of just the fields we need to
+// pick the right TypedArray. `kind` is numpy-style: 'f' float, 'i' signed,
+// 'u' unsigned, 'c' complex.
+export interface TiledDataType {
+  kind: string;
+  itemsize: number;
+  endianness?: string;
+}
+
+export interface ArrayInfo {
+  shape: number[];
+  dtype: TiledDataType;
+}
+
+// One-shot fetch of an array's structural info (shape + dtype). Doesn't
+// touch the bytes — pair with fetchArrayBytesIfChanged for polling.
+export async function fetchArrayInfo(path: string): Promise<ArrayInfo> {
+  const url = `${API_BASE}/metadata/${path}`;
+  const response = await fetchWithAuth(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch array info: ${response.status}`);
+  }
+  const data = await response.json();
+  const attrs = data?.attributes ?? data?.data?.attributes;
+  const structure = attrs?.structure;
+  return {
+    shape: (structure?.shape as number[]) ?? [],
+    dtype: (structure?.data_type as TiledDataType) ?? { kind: '?', itemsize: 0 },
+  };
+}
+
+export type ArrayBytesResult =
+  | { status: 'changed'; etag: string | null; buffer: ArrayBuffer }
+  | { status: 'unchanged'; etag: string | null }
+  | { status: 'error' };
+
+// Fetch a sliced array as raw bytes with conditional revalidation. On 304
+// (unchanged), no buffer is returned — caller keeps its previous render.
+// `slice` matches Tiled's slice query param: a single number selects the
+// leading dim, a string like "0,1" or ":,:" applies multi-dim slicing.
+export async function fetchArrayBytesIfChanged(
+  path: string,
+  slice: number | string,
+  lastEtag: string | null,
+): Promise<ArrayBytesResult> {
+  try {
+    const authHeader = await getValidAuthHeader();
+    const url = `${API_BASE}/array/full/${path}?format=application/octet-stream&slice=${slice}`;
+    const headers: Record<string, string> = {};
+    if (authHeader) headers['Authorization'] = authHeader;
+    if (lastEtag) headers['If-None-Match'] = lastEtag;
+    const response = await fetch(url, { headers });
+    if (response.status === 304) {
+      return { status: 'unchanged', etag: lastEtag };
+    }
+    if (!response.ok) {
+      return { status: 'error' };
+    }
+    const etag = response.headers.get('ETag');
+    const buffer = await response.arrayBuffer();
+    return { status: 'changed', etag, buffer };
+  } catch {
+    return { status: 'error' };
+  }
+}
+
 // Fetch a tiled array as raw little-endian bytes plus its shape.
 // Caller wraps `buffer` in the appropriate TypedArray (Float32Array,
 // Int32Array, …); we don't infer dtype because callers already know what
