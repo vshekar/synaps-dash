@@ -6,6 +6,7 @@ import { X, ChevronDown, Copy, Check, Layers, Grid3X3, Clock, Hash, Maximize2, A
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ArrayViewer } from './array-viewer';
 import { HoloptychoViewer } from './holoptycho-viewer';
+import { NiiVueViewer } from './niivue-viewer';
 import { SvgExportButton } from './svg-export-button';
 import { SegmentationPlotButton } from './segmentation-plot';
 import { DatasetItem } from '@/lib/tiled/types';
@@ -431,23 +432,29 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
                           })}
                         </div>
                       )}
-                      <ArrayViewer
-                        path={arrayPath}
-                        metadata={reconstructionMetadata || metadata}
-                        showScalebar={false}
-                        showColorbar={false}
-                        numSlices={numSlices}
-                        arrayShape={arrayShape || undefined}
-                        segmentationRows={segmentationTableData}
-                      />
-                      <div className="flex gap-2">
-                        <SvgExportButton path={arrayPath} filename={`${metadata.scan_id || item.id}.svg`} />
-                        <SegmentationPlotButton
-                          path={arrayPath}
-                          metadata={metadata}
-                          title={`Segmentation - Scan ${metadata.scan_id || item.id}`}
-                        />
-                      </div>
+                      {arrayChildren.length > 0 && arrayShape?.length === 3 ? (
+                        <NiiVueViewer key={arrayPath} path={arrayPath} />
+                      ) : (
+                        <>
+                          <ArrayViewer
+                            path={arrayPath}
+                            metadata={reconstructionMetadata || metadata}
+                            showScalebar={false}
+                            showColorbar={false}
+                            numSlices={numSlices}
+                            arrayShape={arrayShape || undefined}
+                            segmentationRows={segmentationTableData}
+                          />
+                          <div className="flex gap-2">
+                            <SvgExportButton path={arrayPath} filename={`${metadata.scan_id || item.id}.svg`} />
+                            <SegmentationPlotButton
+                              path={arrayPath}
+                              metadata={metadata}
+                              title={`Segmentation - Scan ${metadata.scan_id || item.id}`}
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
                   ) : null}
                 </motion.div>
