@@ -207,8 +207,8 @@ export async function listChildren(
     timeCreated: findTimestamp(node.attributes.metadata),
   }));
 
-  // Filter out non-automap items from top-level reconstructions/segmentations only
-  if (path.endsWith('/reconstructions') || path.endsWith('/segmentations')) {
+  // Filter out non-automap items from top-level synaps reconstructions/segmentations only
+  if (path.endsWith('synaps/reconstructions') || path.endsWith('synaps/segmentations')) {
     items = items.filter(item => item.id.startsWith('automap_'));
   }
 

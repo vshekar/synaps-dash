@@ -169,6 +169,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [segmentationTableData, setSegmentationTableData] = useState<Record<string, unknown>[] | null>(null);
   const [reconstructionMetadata, setReconstructionMetadata] = useState<Record<string, unknown> | null>(null);
+  const [arrayChildren, setArrayChildren] = useState<DatasetItem[]>([]);
 
   const isHoloptycho = item ? isHoloptychoRun(item.path, item.structureFamily) : false;
 
@@ -177,6 +178,7 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
 
     // Reset segmentation data when item changes
     setSegmentationTableData(null);
+    setArrayChildren([]);
 
     // Holoptycho runs are rendered by their own viewer — no array discovery needed.
     if (isHoloptychoRun(item.path, item.structureFamily)) {
@@ -267,6 +269,28 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
         })
         .catch(err => {
           console.warn('[DetailPanel] BlueskyRun discovery failed:', err);
+        })
+        .finally(() => setIsDiscovering(false));
+      return;
+    }
+
+    // Generic container fallback: find array children and let the user pick one.
+    // Covers hxn/processed/segmentations/{run} (4 sibling 3D volumes) and similar.
+    if (item.structureFamily === 'container') {
+      setIsDiscovering(true);
+      setArrayPath(null);
+      setArrayShape(null);
+      listChildren(item.path, { limit: 20 })
+        .then((result) => {
+          const arrays = result.items.filter(c => c.structureFamily === 'array');
+          setArrayChildren(arrays);
+          if (arrays.length > 0) {
+            setArrayPath(arrays[0].path);
+            setArrayShape(arrays[0].shape || null);
+          }
+        })
+        .catch(err => {
+          console.warn('[DetailPanel] Container discovery failed:', err);
         })
         .finally(() => setIsDiscovering(false));
       return;
@@ -384,6 +408,29 @@ export function DetailPanel({ item, onClose }: DetailPanelProps) {
                     </div>
                   ) : arrayPath ? (
                     <div className="space-y-3">
+                      {arrayChildren.length > 1 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {arrayChildren.map((child) => {
+                            const isActive = child.path === arrayPath;
+                            return (
+                              <button
+                                key={child.path}
+                                onClick={() => {
+                                  setArrayPath(child.path);
+                                  setArrayShape(child.shape || null);
+                                }}
+                                className={`px-2.5 py-1 rounded-md text-[11px] font-mono border transition-colors ${
+                                  isActive
+                                    ? 'bg-beam/15 text-beam border-beam/40'
+                                    : 'bg-surface-raised/50 text-text-tertiary border-border-subtle hover:text-text-secondary hover:border-border-medium'
+                                }`}
+                              >
+                                {child.id}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                       <ArrayViewer
                         path={arrayPath}
                         metadata={reconstructionMetadata || metadata}
