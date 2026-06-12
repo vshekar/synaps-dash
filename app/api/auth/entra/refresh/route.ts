@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { REFRESH_COOKIE } from '@/lib/auth/config';
+import { REFRESH_COOKIE, assertAuthConfig } from '@/lib/auth/config';
 import { decodeSessionToken, issueSessionTokens } from '@/lib/auth/jwt';
 import { setSessionCookies, clearSessionCookies } from '@/lib/auth/cookies';
 import { deleteTokens, getTokens, setTokens } from '@/lib/auth/token-store';
 import { isEntraTokenExpiring, refreshEntraAccessToken } from '@/lib/auth/entra';
 
 export async function POST(request: NextRequest) {
+  assertAuthConfig();
+
   const refreshCookie = request.cookies.get(REFRESH_COOKIE)?.value;
 
   if (!refreshCookie) {
