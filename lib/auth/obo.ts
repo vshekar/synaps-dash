@@ -9,6 +9,7 @@ import { getFreshEntraToken } from './token-store';
 interface OboTokenEntry {
   token: string;
   expiresAt: number; // Unix ms
+  lastUsedAt: number; // Unix ms
 }
 
 // ---------------------------------------------------------------------------
@@ -17,6 +18,17 @@ interface OboTokenEntry {
 
 const OBO_CACHE_BUFFER_MS = 60_000; // Evict 1 min before actual expiry
 const oboCacheKey = '__oboCacheStore';
+const oboCacheLastCleanupKey = '__oboCacheLastCleanup';
+
+function oboCacheMaxEntries(): number {
+  const raw = Number(process.env.OBO_CACHE_MAX_ENTRIES ?? 2000);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2000;
+}
+
+function oboCacheCleanupIntervalMs(): number {
+  const raw = Number(process.env.OBO_CACHE_CLEANUP_INTERVAL_MS ?? 60_000);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 60_000;
+}
 
 function getOboCache(): Map<string, OboTokenEntry> {
   const g = globalThis as Record<string, unknown>;
@@ -24,6 +36,57 @@ function getOboCache(): Map<string, OboTokenEntry> {
     g[oboCacheKey] = new Map<string, OboTokenEntry>();
   }
   return g[oboCacheKey] as Map<string, OboTokenEntry>;
+}
+
+function isEntryUsable(entry: OboTokenEntry, now: number): boolean {
+  return now < entry.expiresAt - OBO_CACHE_BUFFER_MS;
+}
+
+function removeExpiredEntries(cache: Map<string, OboTokenEntry>, now: number): void {
+  for (const [key, entry] of cache.entries()) {
+    if (!isEntryUsable(entry, now)) {
+      cache.delete(key);
+    }
+  }
+}
+
+function enforceCacheSizeLimit(cache: Map<string, OboTokenEntry>): void {
+  const maxEntries = oboCacheMaxEntries();
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (!oldestKey) {
+      break;
+    }
+    cache.delete(oldestKey);
+  }
+}
+
+function maybeRunCacheCleanup(cache: Map<string, OboTokenEntry>, now: number): void {
+  const g = globalThis as Record<string, unknown>;
+  const lastCleanup = (g[oboCacheLastCleanupKey] as number | undefined) ?? 0;
+  if (now - lastCleanup < oboCacheCleanupIntervalMs()) {
+    return;
+  }
+
+  g[oboCacheLastCleanupKey] = now;
+  removeExpiredEntries(cache, now);
+  enforceCacheSizeLimit(cache);
+}
+
+function touchCacheEntry(
+  cache: Map<string, OboTokenEntry>,
+  key: string,
+  entry: OboTokenEntry,
+  now: number
+): void {
+  const updated: OboTokenEntry = {
+    ...entry,
+    lastUsedAt: now,
+  };
+
+  // Reinsert to refresh insertion order for LRU-style eviction.
+  cache.delete(key);
+  cache.set(key, updated);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,10 +148,18 @@ export async function getOboTokenForUser(
 ): Promise<string> {
   const cache = getOboCache();
   const cacheKey = `${username}:${sessionId}:${TILED_SCOPE}`;
+  const now = Date.now();
+
+  maybeRunCacheCleanup(cache, now);
 
   const cached = cache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAt - OBO_CACHE_BUFFER_MS) {
+  if (cached && isEntryUsable(cached, now)) {
+    touchCacheEntry(cache, cacheKey, cached, now);
     return cached.token;
+  }
+
+  if (cached) {
+    cache.delete(cacheKey);
   }
 
   // Get a fresh Entra token for this user
@@ -96,12 +167,15 @@ export async function getOboTokenForUser(
 
   // Exchange for Tiled token
   const oboResult = await exchangeTokenObo(entraToken);
+  const cachedAt = Date.now();
 
   // Cache it
   cache.set(cacheKey, {
     token: oboResult.access_token,
-    expiresAt: Date.now() + oboResult.expires_in * 1000,
+    expiresAt: cachedAt + oboResult.expires_in * 1000,
+    lastUsedAt: cachedAt,
   });
+  enforceCacheSizeLimit(cache);
 
   return oboResult.access_token;
 }

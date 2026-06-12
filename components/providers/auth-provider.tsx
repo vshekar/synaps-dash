@@ -78,8 +78,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         return;
       }
-      // Non-200: clear stale Entra marker
-      clearEntraAuthMarker();
+
+      // Clear stale Entra marker only on explicit auth failures.
+      if (sessionResponse.status === 401 || sessionResponse.status === 403) {
+        clearEntraAuthMarker();
+      }
     } catch {
       // Network error: keep marker unchanged, continue to fallback
     }

@@ -9,21 +9,36 @@ const AUTH_TAG_LEN = 16;
 
 let cachedKey: Buffer | null = null;
 
+function isStrictBase64(value: string): boolean {
+  if (value.length === 0 || value.length % 4 !== 0) {
+    return false;
+  }
+
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    return false;
+  }
+
+  const decoded = Buffer.from(value, 'base64');
+  return decoded.toString('base64') === value;
+}
+
 function getEncryptionKey(): Buffer {
   if (cachedKey) {
     return cachedKey;
   }
 
-  let key: Buffer;
-  try {
-    key = Buffer.from(ENTRA_TOKEN_ENCRYPTION_KEY, 'base64');
-  } catch {
-    throw new Error('[auth/token-crypto] ENTRA_TOKEN_ENCRYPTION_KEY must be valid base64');
+  const keyBase64 = ENTRA_TOKEN_ENCRYPTION_KEY.trim();
+  if (!isStrictBase64(keyBase64)) {
+    throw new Error(
+      '[auth/token-crypto] ENTRA_TOKEN_ENCRYPTION_KEY must be canonical base64'
+    );
   }
+
+  const key = Buffer.from(keyBase64, 'base64');
 
   if (key.length !== 32) {
     throw new Error(
-      '[auth/token-crypto] ENTRA_TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes'
+      '[auth/token-crypto] ENTRA_TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes (base64)'
     );
   }
 
