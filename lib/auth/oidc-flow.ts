@@ -110,30 +110,35 @@ export async function setOidcFlowCookie(
  */
 export async function validateAndConsumeOidcFlow(
   request: NextRequest,
+  response: NextResponse,
   stateParam: string
 ): Promise<{ nonce: string; codeVerifier: string }> {
-  const cookieValue = request.cookies.get(OIDC_FLOW_COOKIE)?.value;
-  if (!cookieValue) {
-    throw new Error('OIDC flow cookie missing');
+  try {
+    const cookieValue = request.cookies.get(OIDC_FLOW_COOKIE)?.value;
+    if (!cookieValue) {
+      throw new Error('OIDC flow cookie missing');
+    }
+
+    const secret = getSecretKey();
+    const { payload } = await jwtVerify(cookieValue, secret, {
+      algorithms: ['HS256'],
+    });
+
+    if (payload.type !== 'oidc_flow') {
+      throw new Error('Invalid OIDC flow token type');
+    }
+
+    if (payload.state !== stateParam) {
+      throw new Error('OIDC state mismatch');
+    }
+
+    return {
+      nonce: payload.nonce as string,
+      codeVerifier: payload.code_verifier as string,
+    };
+  } finally {
+    clearOidcFlowCookie(response);
   }
-
-  const secret = getSecretKey();
-  const { payload } = await jwtVerify(cookieValue, secret, {
-    algorithms: ['HS256'],
-  });
-
-  if (payload.type !== 'oidc_flow') {
-    throw new Error('Invalid OIDC flow token type');
-  }
-
-  if (payload.state !== stateParam) {
-    throw new Error('OIDC state mismatch');
-  }
-
-  return {
-    nonce: payload.nonce as string,
-    codeVerifier: payload.code_verifier as string,
-  };
 }
 
 /**

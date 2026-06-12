@@ -16,16 +16,26 @@ export async function GET(request: NextRequest) {
   // Handle Entra error response
   if (error) {
     console.error('[Entra Callback] Error from Entra:', error);
-    return NextResponse.redirect(new URL('/login?error=signin_failed', request.url));
+    const response = NextResponse.redirect(new URL('/login?error=signin_failed', request.url));
+    clearOidcFlowCookie(response);
+    return response;
   }
 
   if (!code || !stateParam) {
-    return NextResponse.redirect(new URL('/login?error=missing_code', request.url));
+    const response = NextResponse.redirect(new URL('/login?error=missing_code', request.url));
+    clearOidcFlowCookie(response);
+    return response;
   }
+
+  const response = NextResponse.redirect(new URL('/', request.url));
 
   try {
     // Validate OIDC flow state (checks cookie, state match)
-    const { nonce, codeVerifier } = await validateAndConsumeOidcFlow(request, stateParam);
+    const { nonce, codeVerifier } = await validateAndConsumeOidcFlow(
+      request,
+      response,
+      stateParam
+    );
 
     // Build the same redirect_uri used in the login request
     const redirectUri = buildCallbackUrl(request);
@@ -45,15 +55,13 @@ export async function GET(request: NextRequest) {
     const sessionTokens = await issueSessionTokens(username, displayName);
 
     // Redirect to app root with session cookies set
-    const response = NextResponse.redirect(new URL('/', request.url));
     setSessionCookies(response, sessionTokens.accessToken, sessionTokens.refreshToken);
-    clearOidcFlowCookie(response);
 
     return response;
   } catch (err) {
     console.error('[Entra Callback] Auth failed:', err instanceof Error ? err.message : err);
-    const response = NextResponse.redirect(new URL('/login?error=signin_failed', request.url));
-    clearOidcFlowCookie(response);
-    return response;
+    const errorResponse = NextResponse.redirect(new URL('/login?error=signin_failed', request.url));
+    clearOidcFlowCookie(errorResponse);
+    return errorResponse;
   }
 }
