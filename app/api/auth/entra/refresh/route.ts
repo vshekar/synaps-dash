@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { REFRESH_COOKIE } from '@/lib/auth/config';
 import { decodeSessionToken, issueSessionTokens } from '@/lib/auth/jwt';
 import { setSessionCookies, clearSessionCookies } from '@/lib/auth/cookies';
-import { getTokens, setTokens } from '@/lib/auth/token-store';
-import { refreshEntraAccessToken } from '@/lib/auth/entra';
+import { deleteTokens, getTokens, setTokens } from '@/lib/auth/token-store';
+import { isEntraTokenExpiring, refreshEntraAccessToken } from '@/lib/auth/entra';
 
 export async function POST(request: NextRequest) {
   const refreshCookie = request.cookies.get(REFRESH_COOKIE)?.value;
@@ -44,7 +44,6 @@ export async function POST(request: NextRequest) {
     } catch (err) {
       console.error('[Entra Refresh] Failed:', err instanceof Error ? err.message : err);
       // Clear stored tokens on refresh failure
-      const { deleteTokens } = await import('@/lib/auth/token-store');
       deleteTokens(username);
       const response = NextResponse.json(
         { error: 'entra refresh failed' },
@@ -53,6 +52,15 @@ export async function POST(request: NextRequest) {
       clearSessionCookies(response);
       return response;
     }
+  } else if (isEntraTokenExpiring(entry.entraAccessToken)) {
+    // No refresh token available and the access token is expiring/expired.
+    deleteTokens(username);
+    const response = NextResponse.json(
+      { error: 'entra refresh token missing; re-authentication required' },
+      { status: 401 }
+    );
+    clearSessionCookies(response);
+    return response;
   }
 
   // Issue new session tokens
