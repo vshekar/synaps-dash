@@ -1,12 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromRequest, setSessionCookies } from '@/lib/auth/cookies';
+import { getSessionFromRequest, setSessionCookies, clearSessionCookies } from '@/lib/auth/cookies';
 import { issueSessionTokens } from '@/lib/auth/jwt';
+import { deleteTokens, getTokens } from '@/lib/auth/token-store';
+import { isEntraTokenExpiring } from '@/lib/auth/entra';
 
 export async function GET(request: NextRequest) {
   const session = await getSessionFromRequest(request);
 
   if (!session) {
     return NextResponse.json({ error: 'not authenticated' }, { status: 401 });
+  }
+
+  // Ensure server-side Entra credentials still exist
+  const entry = getTokens(session.username);
+  if (!entry) {
+    const response = NextResponse.json({ error: 'not authenticated' }, { status: 401 });
+    clearSessionCookies(response);
+    return response;
+  }
+
+  // If Entra access is expiring and cannot be refreshed, force re-authentication
+  if (!entry.entraRefreshToken && isEntraTokenExpiring(entry.entraAccessToken)) {
+    deleteTokens(session.username);
+    const response = NextResponse.json({ error: 'not authenticated' }, { status: 401 });
+    clearSessionCookies(response);
+    return response;
   }
 
   // If the access token was valid, return user info directly
