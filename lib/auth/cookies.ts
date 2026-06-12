@@ -1,3 +1,4 @@
+import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
 import { ACCESS_COOKIE, REFRESH_COOKIE, ACCESS_TOKEN_LIFETIME, REFRESH_TOKEN_LIFETIME } from './config';
 import { decodeSessionToken } from './jwt';

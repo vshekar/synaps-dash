@@ -1,3 +1,4 @@
+import 'server-only';
 import { createRemoteJWKSet, jwtVerify, decodeJwt } from 'jose';
 import {
   JWKS_URL,

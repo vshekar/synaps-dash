@@ -1,3 +1,4 @@
+import 'server-only';
 import { isEntraTokenExpiring, refreshEntraAccessToken } from './entra';
 import { getDbClient } from '@/lib/db/client';
 
@@ -69,7 +70,7 @@ async function runCleanupIfNeeded(): Promise<void> {
   // TTL eviction
   const cutoff = now - maxAgeSeconds() * 1000;
   await db(TABLE_NAME)
-    .where('updated_at', '<', cutoff)
+    .where('last_used_at', '<', cutoff)
     .delete();
 
   // Size eviction
@@ -83,7 +84,7 @@ async function runCleanupIfNeeded(): Promise<void> {
   const toDelete = totalCount - limit;
   const rows = await db(TABLE_NAME)
     .select('username', 'session_id')
-    .orderBy('updated_at', 'asc')
+    .orderBy('last_used_at', 'asc')
     .limit(toDelete);
 
   if (rows.length > 0) {

@@ -1,3 +1,4 @@
+import 'server-only';
 import { TOKEN_ENDPOINT, CLIENT_ID, CLIENT_SECRET, TILED_SCOPE } from './config';
 import { getFreshEntraToken } from './token-store';
 
