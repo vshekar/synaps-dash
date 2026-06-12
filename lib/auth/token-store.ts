@@ -1,5 +1,6 @@
 import 'server-only';
 import { isEntraTokenExpiring, refreshEntraAccessToken } from './entra';
+import { decryptToken, encryptToken } from './token-crypto';
 import { getDbClient } from '@/lib/db/client';
 
 // ---------------------------------------------------------------------------
@@ -144,9 +145,11 @@ export async function getTokens(
     return null;
   }
 
+  const encryptedRefreshToken = (row.entra_refresh_token as string | null) ?? null;
+
   return {
-    entraAccessToken: row.entra_access_token as string,
-    entraRefreshToken: (row.entra_refresh_token as string | null) ?? null,
+    entraAccessToken: decryptToken(row.entra_access_token as string),
+    entraRefreshToken: encryptedRefreshToken ? decryptToken(encryptedRefreshToken) : null,
     storedAt: Number(row.stored_at),
   };
 }
@@ -159,21 +162,25 @@ export async function setTokens(
   await ensureSchema();
   const db = getDbClient();
   const now = Date.now();
+  const encryptedAccessToken = encryptToken(entry.entraAccessToken);
+  const encryptedRefreshToken = entry.entraRefreshToken
+    ? encryptToken(entry.entraRefreshToken)
+    : null;
 
   await db(TABLE_NAME)
     .insert({
       username,
       session_id: sessionId,
-      entra_access_token: entry.entraAccessToken,
-      entra_refresh_token: entry.entraRefreshToken,
+      entra_access_token: encryptedAccessToken,
+      entra_refresh_token: encryptedRefreshToken,
       stored_at: entry.storedAt,
       updated_at: now,
       last_used_at: now,
     })
     .onConflict(['username', 'session_id'])
     .merge({
-      entra_access_token: entry.entraAccessToken,
-      entra_refresh_token: entry.entraRefreshToken,
+      entra_access_token: encryptedAccessToken,
+      entra_refresh_token: encryptedRefreshToken,
       stored_at: entry.storedAt,
       updated_at: now,
       last_used_at: now,

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import knex from 'knex';
 import { getDatabaseUrl, normalizeSqlitePath } from '../lib/db/url-utils.mjs';
 

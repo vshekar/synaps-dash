@@ -2,7 +2,7 @@ import 'server-only';
 import fs from 'node:fs';
 import path from 'node:path';
 import knex, { Knex } from 'knex';
-import { getDatabaseUrl, normalizeSqlitePath } from './url-utils.mjs';
+import { getDatabaseUrl, normalizeSqlitePath } from './url-utils';
 
 const globalKey = '__appDbClient';
 

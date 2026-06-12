@@ -21,6 +21,7 @@ export const TENANT_ID = process.env.ENTRA_TENANT_ID ?? '';
 export const CLIENT_ID = process.env.ENTRA_CLIENT_ID ?? '';
 export const CLIENT_SECRET = process.env.ENTRA_CLIENT_SECRET ?? '';
 export const SESSION_SECRET = process.env.SESSION_SECRET ?? '';
+export const ENTRA_TOKEN_ENCRYPTION_KEY = process.env.ENTRA_TOKEN_ENCRYPTION_KEY ?? '';
 export const TILED_SCOPE = process.env.TILED_SCOPE ?? '';
 export const APP_BASE_URL = process.env.APP_BASE_URL || null;
 export const REDIRECT_ORIGIN_ALLOWLIST: string[] = (
@@ -58,6 +59,7 @@ export function assertAuthConfig(): void {
   if (!CLIENT_ID) missing.push('ENTRA_CLIENT_ID');
   if (!CLIENT_SECRET) missing.push('ENTRA_CLIENT_SECRET');
   if (!SESSION_SECRET) missing.push('SESSION_SECRET');
+  if (!ENTRA_TOKEN_ENCRYPTION_KEY) missing.push('ENTRA_TOKEN_ENCRYPTION_KEY');
   if (!TILED_SCOPE) missing.push('TILED_SCOPE');
   if (missing.length > 0) {
     throw new Error(

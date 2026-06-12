@@ -158,6 +158,13 @@ The app uses a single `DATABASE_URL` for persistence. Supported values:
 - `file:./data/app.sqlite` (default fallback)
 - `postgres://...` or `postgresql://...`
 
+Security note:
+
+- Persisted Entra credentials are encrypted at the application layer.
+- You must provide `ENTRA_TOKEN_ENCRYPTION_KEY` (base64-encoded 32 bytes).
+- Generate with: `openssl rand -base64 32`
+- Keep this key stable across restarts/deploys, or stored credentials become unreadable.
+
 Initialize schema during deploy:
 
 ```bash
